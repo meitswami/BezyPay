@@ -164,7 +164,12 @@ export function registerCustomerRoutes(server, ctx) {
 
     if (berry) {
       try {
-        dispatchResult = await berry.sendOtp(cleanMobile, otpCode, displayName);
+        let brand = {};
+        try {
+          const merchant = ctx.merchantRepo?.getDefault ? ctx.merchantRepo.getDefault() : null;
+          brand = { appName: merchant?.branding?.appName, businessName: merchant?.businessName };
+        } catch {}
+        dispatchResult = await berry.sendOtp(cleanMobile, otpCode, displayName, brand);
       } catch (err) {
         console.warn(`[CustomerAuth] WhatsApp dispatch notice: ${err.message}`);
       }
@@ -173,6 +178,17 @@ export function registerCustomerRoutes(server, ctx) {
     }
 
     console.log(`[CustomerAuth] OTP generated for +91${cleanMobile} (expires in 5 mins)`);
+
+    // WhatsApp is not linked or refused the message: say so, rather than
+    // telling the customer to wait for a code that is not coming.
+    if (dispatchResult && dispatchResult.success === false) {
+      console.warn(`[CustomerAuth] OTP for +91${cleanMobile.slice(0, 2)}******${cleanMobile.slice(-2)} not delivered: ${dispatchResult.message || dispatchResult.error || dispatchResult.status || 'unknown'}`);
+      HttpServer.json(res, 503, {
+        error: 'We could not send the WhatsApp code right now. Please try again in a few minutes.',
+        code: 'OTP_NOT_DELIVERED'
+      });
+      return;
+    }
 
     HttpServer.json(res, 200, {
       success: true,

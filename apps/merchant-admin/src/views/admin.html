@@ -3729,6 +3729,38 @@
       }).join('');
     }
 
+    // The names the merchant set in Store Settings, shown in place of the
+    // stock "YOUPI PG" / "YOUPI Store" text across this page.
+    let currentBusinessName = '';
+    function brandAppName() {
+      return ((currentMerchantBranding && currentMerchantBranding.appName) || '').trim() || 'YOUPI PG';
+    }
+    function brandStoreName() {
+      const n = (currentBusinessName || '').trim();
+      return n && n !== 'YOUPI Demo Store' ? n : 'YOUPI Store';
+    }
+    function applyAdminBrandText() {
+      const app = brandAppName();
+      const store = brandStoreName();
+      const pairs = [];
+      if (store !== 'YOUPI Store') pairs.push([/YOUPI Showcase Store|YOUPI Store/g, store]);
+      if (app !== 'YOUPI PG') pairs.push([/YOUPI PG|YouPI PG/g, app]);
+      if (!pairs.length) return;
+      const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, {
+        acceptNode: (n) => (n.parentElement && n.parentElement.closest('script,style,textarea,code,pre'))
+          ? NodeFilter.FILTER_REJECT : NodeFilter.FILTER_ACCEPT
+      });
+      const nodes = [];
+      while (walker.nextNode()) nodes.push(walker.currentNode);
+      for (const node of nodes) {
+        if (!/YOUPI|YouPI/.test(node.nodeValue)) continue;
+        let text = node.nodeValue;
+        for (const [re, value] of pairs) text = text.replace(re, value);
+        node.nodeValue = text;
+      }
+      document.title = document.title.replace(/YOUPI PG|YouPI PG/g, app);
+    }
+
     // Where each service is opened from this browser: its public address in
     // production, localhost otherwise. Internal-only services get no link.
     let publicServiceUrls = null;
@@ -3780,13 +3812,13 @@
           cBadge.className = 'badge badge-success';
           cBadge.textContent = '🟢 ONLINE & ACTIVE (PORT 5000)';
           btnToggle.className = 'btn btn-danger';
-          btnToggle.innerHTML = '⏹ Disable YOUPI Store (Port 5000)';
+          btnToggle.innerHTML = `⏹ Disable ${escapeHtml(brandStoreName())} (Port 5000)`;
           if (btnLink) btnLink.style.display = 'inline-flex';
         } else {
           cBadge.className = 'badge badge-danger';
           cBadge.textContent = '🔴 DISABLED (PORT 5000 FREE)';
           btnToggle.className = 'btn btn-success';
-          btnToggle.innerHTML = '▶ Enable YOUPI Store (Port 5000)';
+          btnToggle.innerHTML = `▶ Enable ${escapeHtml(brandStoreName())} (Port 5000)`;
           if (btnLink) btnLink.style.display = 'none';
         }
       }
@@ -3798,10 +3830,10 @@
 
       if (isRunning) {
         await stopService('coin-wallet-store');
-        showAdminToast('YOUPI Showcase Store disabled. Port 5000 freed.');
+        showAdminToast(`${brandStoreName()} disabled. Port 5000 freed.`);
       } else {
         await startService('coin-wallet-store');
-        showAdminToast('YOUPI Showcase Store enabled on port 5000!');
+        showAdminToast(`${brandStoreName()} enabled on port 5000!`);
       }
     }
 
@@ -4408,7 +4440,9 @@
 
           const branding = mData.branding || {};
           currentMerchantBranding = branding;
+          currentBusinessName = mData.businessName || '';
           applyRuntimeUrls(mData.runtimeUrls);
+          applyAdminBrandText();
 
           const setVal = (id, val) => {
             const el = document.getElementById(id);
@@ -4692,8 +4726,10 @@
         const data = await res.json();
         if (res.ok) {
           if (data.branding) currentMerchantBranding = data.branding;
+          if (data.businessName) currentBusinessName = data.businessName;
           showAdminToast('Store settings & branding saved successfully! Live on checkout.');
           updateLiveWhiteLabelPreview();
+          applyAdminBrandText();
         } else {
           showAdminToast(data.error || 'Failed to save merchant settings', false);
         }

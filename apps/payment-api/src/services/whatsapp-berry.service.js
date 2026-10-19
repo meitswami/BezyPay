@@ -622,14 +622,19 @@ export class WhatsAppBerryService extends EventEmitter {
    * @param {string} to 10-digit or full phone number
    * @param {string} otpCode 6-digit verification code
    * @param {string} [customerName]
+   * @param {{ appName?: string, businessName?: string }} [brand] names the merchant set in Admin
    */
-  async sendOtp(to, otpCode, customerName = '') {
-    const greeting = customerName ? `Hello *${customerName}*!` : 'Hello!';
+  async sendOtp(to, otpCode, customerName = '', brand = {}) {
+    // Plain text only: these are merchant-set names inside WhatsApp formatting.
+    const plain = (v) => String(v || '').replace(/[*_~`\r\n]/g, '').trim().slice(0, 60);
+    const appName = plain(brand.appName) || 'YOUPI PG';
+    const businessName = plain(brand.businessName);
+    const greeting = customerName ? `Hello *${plain(customerName)}*!` : 'Hello!';
     const message =
-      `🔐 *YOUPI PG Verification Code*\n\n` +
+      `🔐 *${appName} Verification Code*\n\n` +
       `${greeting} Your one-time login OTP is: *${otpCode}*\n\n` +
       `⏱ _Valid for 5 minutes. Do not share this code with anyone._\n\n` +
-      `— *YOUPI PG Secure Payments*`;
+      `— *${businessName ? `${businessName} · ${appName}` : `${appName} Secure Payments`}*`;
 
     return this.sendMessage(to, message);
   }
