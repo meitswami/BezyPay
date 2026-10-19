@@ -99,11 +99,13 @@ async function verifyProductionCheckoutUrl() {
   console.log('   Payment ID:  ', storeRes.paymentId);
   console.log('   Checkout URL:', storeRes.checkoutUrl);
 
-  assert.ok(
-    storeRes.checkoutUrl.startsWith('https://checkout.example.com/checkout/'),
-    `Expected Demo Store to return https://checkout.example.com/checkout/, but got: ${storeRes.checkoutUrl}`
+  // The store frames checkout through its own same-origin /checkout proxy.
+  assert.strictEqual(
+    storeRes.checkoutUrl,
+    `/checkout/${storeRes.paymentId}`,
+    `Expected Demo Store to return its own /checkout/<id> path, but got: ${storeRes.checkoutUrl}`
   );
-  console.log('   [✓] Demo Coin Store checkoutUrl points to https://checkout.example.com/checkout/<id>!');
+  console.log('   [✓] Demo Coin Store checkoutUrl points to its own /checkout/<id> proxy!');
 
   // Cleanup
   await paymentApi.close();

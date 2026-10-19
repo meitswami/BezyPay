@@ -456,11 +456,13 @@ export class CoinWalletStoreServer {
 
             this.orderPayments.set(orderId, payment.paymentId);
 
-            // Normalize checkoutUrl for localhost development / testing to prevent tunnel offline issues
-            let resolvedCheckoutUrl = payment.checkoutUrl;
-            if (this.publicBaseUrl.includes('localhost') || this.publicBaseUrl.includes('127.0.0.1')) {
-              resolvedCheckoutUrl = `${this.publicBaseUrl}/checkout/${payment.paymentId}`;
-            }
+            // The checkout opens in an iframe on this page. This store forwards
+            // /checkout, /icons and /api/v1 to the gateway, so the iframe is
+            // pointed at that same-origin path: the store's CSP only allows
+            // frames from its own origin, and the checkout portal only allows
+            // being framed by its own origin. A relative path also works
+            // whichever host name the store is opened on.
+            const resolvedCheckoutUrl = `/checkout/${encodeURIComponent(payment.paymentId)}`;
 
             res.writeHead(200, {
               'Content-Type': 'application/json',
