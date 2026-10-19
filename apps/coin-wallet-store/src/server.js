@@ -4,6 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { YoupiPaymentClient } from '@youpi/merchant-sdk';
 import { getCoinStoreWebhookSecret } from '@youpi/common';
+import { BrandingCache, applyBranding, iconSvg } from './branding.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -13,7 +14,8 @@ const BASE_SECURITY_HEADERS = Object.freeze({
   'X-Content-Type-Options': 'nosniff',
   'X-Frame-Options': 'SAMEORIGIN',
   'Referrer-Policy': 'strict-origin-when-cross-origin',
-  'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline'; script-src 'self' 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; object-src 'none'"
+  // Google Fonts is the only outside source: the pages are set in Inter and Outfit.
+  'Content-Security-Policy': "default-src 'self'; img-src 'self' data: https:; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com; script-src 'self' 'unsafe-inline'; frame-ancestors 'self'; base-uri 'none'; form-action 'self'; object-src 'none'"
 });
 
 /**
@@ -94,6 +96,9 @@ export class CoinWalletStoreServer {
     // Recently processed X-Gateway-Delivery-Id values, used to reject replayed webhooks.
     this.seenDeliveryIds = new Map();
 
+    // The merchant's name, colour and logo from Admin > Store Settings.
+    this.branding = new BrandingCache(this.gatewayApiUrl, this.merchantId);
+
     this.paymentClient = new YoupiPaymentClient({
       apiUrl: this.gatewayApiUrl,
       merchantId: this.merchantId,
@@ -171,6 +176,17 @@ export class CoinWalletStoreServer {
       if (pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ status: 'UP', service: 'coin-wallet-store', coins: this.walletCoins }));
+        return;
+      }
+
+      // GET /favicon.svg and /favicon.ico: the store's initial on its brand colour.
+      if ((pathname === '/favicon.svg' || pathname === '/favicon.ico') && (method === 'GET' || method === 'HEAD')) {
+        res.writeHead(200, {
+          'Content-Type': 'image/svg+xml',
+          'Cache-Control': 'public, max-age=300'
+        });
+        if (method === 'HEAD') { res.end(); return; }
+        res.end(iconSvg(await this.branding.get()));
         return;
       }
 
@@ -276,7 +292,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(this.storeHtml);
+        res.end(applyBranding(this.storeHtml, await this.branding.get()));
         return;
       }
 
@@ -291,7 +307,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(this.walletHtml);
+        res.end(applyBranding(this.walletHtml, await this.branding.get()));
         return;
       }
 
@@ -317,7 +333,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(rendered);
+        res.end(applyBranding(rendered, await this.branding.get()));
         return;
       }
 
@@ -337,7 +353,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(rendered);
+        res.end(applyBranding(rendered, await this.branding.get()));
         return;
       }
 
@@ -353,7 +369,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(rendered);
+        res.end(applyBranding(rendered, await this.branding.get()));
         return;
       }
 
@@ -369,7 +385,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(rendered);
+        res.end(applyBranding(rendered, await this.branding.get()));
         return;
       }
 
@@ -385,7 +401,7 @@ export class CoinWalletStoreServer {
           ...BASE_SECURITY_HEADERS
         });
         if (method === 'HEAD') { res.end(); return; }
-        res.end(rendered);
+        res.end(applyBranding(rendered, await this.branding.get()));
         return;
       }
 
@@ -456,11 +472,13 @@ export class CoinWalletStoreServer {
 
             this.orderPayments.set(orderId, payment.paymentId);
 
-            // Normalize checkoutUrl for localhost development / testing to prevent tunnel offline issues
-            let resolvedCheckoutUrl = payment.checkoutUrl;
-            if (this.publicBaseUrl.includes('localhost') || this.publicBaseUrl.includes('127.0.0.1')) {
-              resolvedCheckoutUrl = `${this.publicBaseUrl}/checkout/${payment.paymentId}`;
-            }
+            // The checkout opens in an iframe on this page. This store forwards
+            // /checkout, /icons and /api/v1 to the gateway, so the iframe is
+            // pointed at that same-origin path: the store's CSP only allows
+            // frames from its own origin, and the checkout portal only allows
+            // being framed by its own origin. A relative path also works
+            // whichever host name the store is opened on.
+            const resolvedCheckoutUrl = `/checkout/${encodeURIComponent(payment.paymentId)}`;
 
             res.writeHead(200, {
               'Content-Type': 'application/json',

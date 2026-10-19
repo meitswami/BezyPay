@@ -5,6 +5,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Merchant Portal & Control Hub — YOUPI PG</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns=%27http://www.w3.org/2000/svg%27 viewBox=%270 0 64 64%27%3E%3Crect width=%2764%27 height=%2764%27 rx=%2714%27 fill=%27%232563eb%27/%3E%3Cpath d=%27M32 12l16 6v12c0 11-7 19-16 22-9-3-16-11-16-22V18z%27 fill=%27%23fff%27/%3E%3C/svg%3E" />
   <style>
     :root,
     [data-theme="light"] {
@@ -3388,7 +3389,11 @@
       const clear = () => { try { sessionStorage.removeItem(KEY); } catch (e) {} };
 
       function isProtected(url) {
-        return /\/api\/v1\/admin\//.test(url) && !/\/admin\/sms-gateway\/download-apk/.test(url);
+        if (/\/api\/v1\/admin\//.test(url) && !/\/admin\/sms-gateway\/download-apk/.test(url)) return true;
+        // The service supervisor and its live log stream also need the admin token.
+        let path = '';
+        try { path = new URL(url, window.location.href).pathname; } catch (e) { return false; }
+        return path === '/api/services' || path.startsWith('/api/services/') || path === '/api/logs/stream';
       }
 
       function prompt(message) {
@@ -3715,13 +3720,34 @@
                 <button class="btn btn-secondary" style="padding:0.3rem 0.65rem; font-size:0.75rem;" onclick="restartService('${s.id}')">🔄 Restart</button>
               `}
               ${isRunning && s.port ? `
-                <a href="http://localhost:${s.port}" target="_blank" class="btn btn-secondary" style="padding:0.3rem 0.55rem; font-size:0.75rem; text-decoration:none;" title="Open in browser">↗</a>
+                ${serviceOpenUrl(s) ? `<a href="${serviceOpenUrl(s)}" target="_blank" rel="noopener" class="btn btn-secondary" style="padding:0.3rem 0.55rem; font-size:0.75rem; text-decoration:none;" title="Open in browser">↗</a>` : ''}
               ` : ''}
             </div>
           </td>
         </tr>
       `;
       }).join('');
+    }
+
+    // Where each service is opened from this browser: its public address in
+    // production, localhost otherwise. Internal-only services get no link.
+    let publicServiceUrls = null;
+    function serviceOpenUrl(s) {
+      if (!publicServiceUrls) return s.port ? `http://localhost:${s.port}` : '';
+      return publicServiceUrls[s.id] || '';
+    }
+    function applyRuntimeUrls(runtime) {
+      if (!runtime || runtime.mode !== 'production') return;
+      publicServiceUrls = {
+        'payment-api': runtime.apiUrl,
+        'checkout-portal': runtime.checkoutUrl,
+        'merchant-admin': runtime.adminUrl,
+        'gmail-observer': runtime.gmailUrl,
+        'coin-wallet-store': runtime.storeUrl
+      };
+      const storeLink = document.getElementById('btnOpenStoreLink');
+      if (storeLink && runtime.storeUrl) storeLink.href = runtime.storeUrl;
+      if (servicesList.length) renderServicesTable(servicesList);
     }
 
     // --- YOUPI SHOWCASE STORE (PORT 5000) MASTER SWITCH ---
@@ -3835,25 +3861,41 @@
 
     // --- LIVE AGGREGATE TERMINAL LOGS (SSE) ---
     let rawLogsBuffer = [];
-    function connectServicesLogsSse() {
+    // Read with fetch rather than EventSource: EventSource cannot send the admin
+    // token, so the stream was always refused.
+    async function connectServicesLogsSse() {
       if (servicesLogsSse) return;
+      const ctrl = new AbortController();
+      servicesLogsSse = ctrl;
       try {
-        servicesLogsSse = new EventSource('/api/logs/stream');
-        servicesLogsSse.addEventListener('log', (e) => {
-          try {
-            const entry = JSON.parse(e.data);
-            appendLogEntry(entry);
-          } catch { }
-        });
-        servicesLogsSse.addEventListener('status_change', () => {
-          loadServices();
-        });
-        servicesLogsSse.onerror = () => {
-          servicesLogsSse.close();
-          servicesLogsSse = null;
-          setTimeout(connectServicesLogsSse, 5000);
-        };
+        const res = await fetch('/api/logs/stream', { signal: ctrl.signal, headers: { Accept: 'text/event-stream' } });
+        if (!res.ok || !res.body) throw new Error('Log stream HTTP ' + res.status);
+        const reader = res.body.pipeThrough(new TextDecoderStream()).getReader();
+        let buf = '';
+        for (;;) {
+          const { value, done } = await reader.read();
+          if (done) break;
+          buf += value.replace(/\r\n/g, '\n');
+          let cut;
+          while ((cut = buf.indexOf('\n\n')) !== -1) {
+            const block = buf.slice(0, cut);
+            buf = buf.slice(cut + 2);
+            let event = 'message';
+            let data = '';
+            for (const line of block.split('\n')) {
+              if (line.startsWith('event:')) event = line.slice(6).trim();
+              else if (line.startsWith('data:')) data += (data ? '\n' : '') + line.slice(5).replace(/^ /, '');
+            }
+            if (event === 'log') {
+              try { appendLogEntry(JSON.parse(data)); } catch { }
+            } else if (event === 'status_change') {
+              loadServices();
+            }
+          }
+        }
       } catch (e) { }
+      if (servicesLogsSse === ctrl) servicesLogsSse = null;
+      setTimeout(connectServicesLogsSse, 5000);
     }
 
     function appendLogEntry(entry) {
@@ -4366,6 +4408,7 @@
 
           const branding = mData.branding || {};
           currentMerchantBranding = branding;
+          applyRuntimeUrls(mData.runtimeUrls);
 
           const setVal = (id, val) => {
             const el = document.getElementById(id);
