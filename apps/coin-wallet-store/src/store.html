@@ -1066,11 +1066,11 @@
             </div>
           </div>
 
-          <!-- PRIMARY BUY BUTTON (Official One-Button Integration Target) -->
+          <!-- PRIMARY BUY BUTTON: started by startGatewayPurchase() only. It must not also carry
+               data-youpi-pay, or the SDK starts a second payment on the same click. -->
           <button type="button"
                   class="btn-buy-primary"
                   id="btnInitiateCheckout"
-                  data-youpi-pay
                   data-order-id=""
                   data-amount="1.00"
                   data-currency="INR"

@@ -213,13 +213,31 @@
         }
 
         instance.options.paymentId = data.paymentId;
-        instance.options.checkoutUrl = data.checkoutUrl;
+        instance.options.checkoutUrl = YoupiCheckout._frameableCheckoutUrl(data.checkoutUrl, data.paymentId, instance.options.portalUrl);
         instance.open();
         return instance;
       } catch (err) {
         console.error('[YouPI JS] Payment initialization error:', err.message);
         throw err;
       }
+    }
+
+    /**
+     * The gateway names the checkout portal's public host in checkoutUrl. When
+     * this script was loaded from the page's own host, that host forwards
+     * /checkout to the portal (as the demo store does), so the checkout is
+     * framed from there: browsers block framing the portal from another host.
+     */
+    static _frameableCheckoutUrl(checkoutUrl, paymentId, portalUrl) {
+      if (!isBrowser || !checkoutUrl || !paymentId || !portalUrl) return checkoutUrl;
+      try {
+        const portal = new URL(portalUrl, window.location.href);
+        const given = new URL(checkoutUrl, window.location.href);
+        if (portal.origin === window.location.origin && given.origin !== window.location.origin) {
+          return `${portal.origin}/checkout/${encodeURIComponent(paymentId)}${given.search}`;
+        }
+      } catch (e) { }
+      return checkoutUrl;
     }
 
     /**
@@ -240,7 +258,15 @@
         return;
       }
       if (this.isOpen) return;
+      // One checkout at a time: a second one (for example a button wired both
+      // by data-youpi-pay and by its own click handler) would stack a modal on top.
+      const active = YoupiCheckout._active;
+      if (active && active !== this && active.isOpen) {
+        console.warn('[YouPI JS] A checkout is already open; not opening a second one.');
+        return;
+      }
       this.isOpen = true;
+      YoupiCheckout._active = this;
 
       YoupiCheckout._ensureStyles();
 
@@ -284,6 +310,7 @@
     close(callback) {
       if (!isBrowser || !this.isOpen) return;
       this.isOpen = false;
+      if (YoupiCheckout._active === this) YoupiCheckout._active = null;
 
       window.removeEventListener('message', this._handleMessage);
 
